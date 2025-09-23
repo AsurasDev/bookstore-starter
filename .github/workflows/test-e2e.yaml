@@ -83,12 +83,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: 'yarn'
+          cache-dependency-path: |
+            backend/yarn.lock
+            storefront/yarn.lock
 
       - name: Initialize PostgreSQL
         run: |
@@ -97,7 +101,7 @@ jobs:
           psql -h localhost -U postgres -d test -c "CREATE DATABASE ${{ env.TEST_POSTGRES_DATABASE }} OWNER ${{ env.TEST_POSTGRES_USER }};"
 
       - name: Install Medusa CLI
-        run: npm install @medusajs/medusa-cli@preview -g
+        run: npm install -g @medusajs/medusa-cli
       - name: Setup medusa backend server
         working-directory: ./
         # https://docs.medusajs.com/cli/reference#options
@@ -117,28 +121,29 @@ jobs:
 
       - name: Setup search in the backend
         working-directory: ./backend
-        run: yarn add medusa-plugin-meilisearch
-
-      - name: Move custom medusa config to the backend
-        run: cp storefront/.github/scripts/medusa-config.js backend/medusa-config.js
+        run: yarn add medusa-plugin-meilisearch && yarn
 
       - name: Seed data from default seed file
         working-directory: ./backend
-        run: medusa seed --seed-file=data/seed.json
+        run: medusa seed -f data/seed.json
 
       - name: Run backend server
         working-directory: ./backend
-        run: medusa develop
+        run: medusa develop &
+
+      - name: Wait for backend to be ready
+        run: sleep 15 && curl --retry 10 --retry-delay 5 --retry-connrefused http://localhost:9000/health
 
       - name: Install packages
         working-directory: ./storefront
-        run: yarn install -y
+        run: yarn install --frozen-lockfile
 
       - name: Install playwright
         working-directory: ./storefront
         run: yarn playwright install --with-deps
 
       - name: Setup frontend
+        # The playwright config starts the server, so no need to run `yarn start`
         working-directory: ./storefront
         run: yarn build
 
